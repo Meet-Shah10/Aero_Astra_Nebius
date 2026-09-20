@@ -1,0 +1,35 @@
+# Python
+__pycache__
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Node / frontend
+node_modules/
+dist/
+
+# Git history (not needed in image)
+.git/
+.gitignore
+
+# Secrets — never bake into the image
+.env
+.env.*
+!.env.example
+
+# RAG vectorstore — rebuilt at container start from seed.py
+backend/athena/rag/vectorstore/
+
+# Local model weights (not committed, not needed in cloud build)
+backend/models/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

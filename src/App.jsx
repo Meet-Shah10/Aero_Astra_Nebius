@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { WS_URL } from './config.js';
 import ModelViewer from './components/ModelViewer';
 import Scene3D from './components/Scene3D';
 import Globe3D from './components/Globe3D';
@@ -398,7 +399,6 @@ function App() {
 
   // ── WebSocket connection: open immediately on mount, persist for session ──
   useEffect(() => {
-    const WS_URL = 'ws://localhost:8000/ws';
     let ws;
     let reconnectTimer;
 

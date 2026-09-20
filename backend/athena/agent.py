@@ -4,8 +4,8 @@ AERO-ASTRA — ATHENA Recovery Planning Agent
 Agent 5 of AERO-ASTRA | Recovery Plan Synthesis
 
 Orchestrates the three-phase planning pipeline:
-  Phase 1 (LLM)         — ATHENA calls Claude/Gemini (via OpenRouter)
-                           with SHERLOCK's diagnosis + ORACLE's
+  Phase 1 (LLM)         — ATHENA calls Nemotron (via Nebius Token Factory)
+                           with SHERLOCK’s diagnosis + ORACLE’s
                            validated rankings + RECOVERY_CATALOG
                            descriptions. The LLM produces
                            reasoning_cot, overall_reasoning, and 2–3 options
@@ -17,7 +17,7 @@ Orchestrates the three-phase planning pipeline:
                            B: Schema validation (required fields, value ranges)
                            C: Anti-hallucination — every action_name in the
                               response must appear in oracle_response.results.
-                              This is the ATHENA-equivalent of SHERLOCK's
+                              This is the ATHENA-equivalent of SHERLOCK’s
                               graph-candidate check.
 
   Phase 3 (Assembly)    — Deterministic, no LLM.
@@ -53,6 +53,7 @@ from typing import Any
 
 from openai import OpenAI
 from backend.llm_client import call_llm_with_fallback, LLMProvider
+from backend.nebius import nebius_only, nebius_provider
 
 from backend.oracle.schemas import OracleResponse
 from backend.sherlock.schemas import SherlockDiagnosis
@@ -80,8 +81,9 @@ log = logging.getLogger(__name__)
 # Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Env vars used: NVIDIA_API_KEY (primary cloud fallback), OPENROUTER_API_KEY (secondary)
-# Local models: MLX-LM port 8081 (Llama 3.1 8B) → Ollama → cloud fallback
+# Env vars used: NEBIUS_API_KEY + NEBIUS_MODEL_ATHENA (primary),
+# NVIDIA_API_KEY (dev fallback), OLLAMA_BASE_URL (dev fallback)
+# Local models: Nebius Token Factory (Nemotron) → NVIDIA NIM → Ollama
 DEFAULT_MODEL       = "google/gemini-2.5-flash"
 
 # 0.15: slightly above SHERLOCK's 0.1 — procedure prose benefits from natural
@@ -124,45 +126,58 @@ class AthenaAgent:
         temperature: float = DEFAULT_TEMPERATURE,
         max_retries: int = DEFAULT_MAX_RETRIES,
     ) -> None:
-        # Build ATHENA-specific provider chain (cloud-first, not local-first).
-        # MLX-LM 8B was consistently unreliable for ATHENA's large JSON responses
-        # (empty responses, timeouts). NVIDIA NIM provides fast, structured JSON
-        # output and is the reliable choice for ATHENA's planning phase.
-        #
-        # Priority: NVIDIA NIM (nemotron-70b) → NVIDIA NIM (deepseek) → Ollama (local)
-        nv_key     = os.environ.get("NVIDIA_API_KEY")
-        nv_base    = "https://integrate.api.nvidia.com/v1"
+        # Build ATHENA-specific provider chain.
+        # Priority (demo/hosted): Nebius Token Factory (Nemotron) only.
+        # Priority (dev): Nebius → NVIDIA NIM (nemotron-70b) → NVIDIA NIM (deepseek) → Ollama.
+        nv_key      = os.environ.get("NVIDIA_API_KEY")
+        nv_base     = "https://integrate.api.nvidia.com/v1"
         ollama_base = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
         resolved_ollama = ollama_model or os.environ.get("OLLAMA_MODEL", "mistral-nemo:12b")
 
         self._providers: list[LLMProvider] = []
 
-        # 1. NVIDIA NIM — primary (fast cloud inference, reliable structured JSON)
-        if nv_key:
-            self._providers.append(LLMProvider(
-                name="NVIDIA NIM (nemotron-70b)",
-                client=OpenAI(base_url=nv_base, api_key=nv_key),
-                model="nvidia/nemotron-3-super-120b-a12b",
-            ))
-            log.info("ATHENA provider 1: NVIDIA NIM (nemotron-3-super-120b-a12b)")
-            # 2. NVIDIA NIM deepseek — secondary cloud fallback
-            self._providers.append(LLMProvider(
-                name="NVIDIA NIM (deepseek-fallback)",
-                client=OpenAI(base_url=nv_base, api_key=nv_key),
-                model="deepseek-ai/deepseek-v4-flash-0731",
-            ))
-            log.info("ATHENA provider 2: NVIDIA NIM (deepseek-v4-flash-0731)")
-        else:
-            log.warning("ATHENA: NVIDIA_API_KEY not set — cloud inference unavailable")
+        # 1. Nebius Token Factory — primary for demo, video, and hosted build.
+        nebius = nebius_provider("NEBIUS_MODEL_ATHENA", timeout_s=180)
+        if nebius:
+            self._providers.append(nebius)
 
-        # 3. Ollama — local fallback when cloud is unavailable
-        self._providers.append(LLMProvider(
-            name="Ollama (local)",
-            client=OpenAI(base_url=ollama_base, api_key="ollama"),
-            model=resolved_ollama,
-            timeout_s=180,
-        ))
-        log.info("ATHENA provider %d: Ollama local (%s)", len(self._providers), resolved_ollama)
+        if nebius_only():
+            # Demo / hosted mode: Token Factory only. Raise loudly if missing.
+            if nebius is None:
+                raise RuntimeError(
+                    "NEBIUS_ONLY=1 but NEBIUS_MODEL_ATHENA / NEBIUS_API_KEY / "
+                    "NEBIUS_BASE_URL are not set. Check your .env."
+                )
+        else:
+            # Development mode: fall back to NVIDIA NIM and Ollama when Nebius
+            # is not configured or when Token Factory is unavailable.
+
+            # 2. NVIDIA NIM — fast cloud inference, reliable structured JSON
+            if nv_key:
+                self._providers.append(LLMProvider(
+                    name="NVIDIA NIM (nemotron-70b)",
+                    client=OpenAI(base_url=nv_base, api_key=nv_key),
+                    model="nvidia/nemotron-3-super-120b-a12b",
+                ))
+                log.info("ATHENA provider: NVIDIA NIM (nemotron-3-super-120b-a12b)")
+                # 3. NVIDIA NIM deepseek — secondary cloud fallback
+                self._providers.append(LLMProvider(
+                    name="NVIDIA NIM (deepseek-fallback)",
+                    client=OpenAI(base_url=nv_base, api_key=nv_key),
+                    model="deepseek-ai/deepseek-v4-flash-0731",
+                ))
+                log.info("ATHENA provider: NVIDIA NIM (deepseek-v4-flash-0731)")
+            else:
+                log.warning("ATHENA: NVIDIA_API_KEY not set — cloud inference unavailable")
+
+            # 4. Ollama — local fallback when cloud is unavailable
+            self._providers.append(LLMProvider(
+                name="Ollama (local)",
+                client=OpenAI(base_url=ollama_base, api_key="ollama"),
+                model=resolved_ollama,
+                timeout_s=180,
+            ))
+            log.info("ATHENA provider: Ollama local (%s)", resolved_ollama)
 
         self._temperature = temperature
         self._max_retries = max_retries

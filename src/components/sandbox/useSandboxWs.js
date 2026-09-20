@@ -8,8 +8,7 @@
  * stopRun()              — abort mid-run
  */
 import { useRef, useState, useCallback, useEffect } from 'react';
-
-const WS_URL = 'ws://localhost:8000/ws/sandbox';
+import { SANDBOX_WS_URL } from '../../config.js';
 const RENDER_THROTTLE_MS = 50;
 
 export default function useSandboxWs() {
@@ -40,7 +39,7 @@ export default function useSandboxWs() {
 
   const connect = useCallback(() => {
     if (wsRef.current && wsRef.current.readyState < 2) return;
-    const ws = new WebSocket(WS_URL);
+    const ws = new WebSocket(SANDBOX_WS_URL);
     wsRef.current = ws;
     ws.onmessage = (e) => {
       try {

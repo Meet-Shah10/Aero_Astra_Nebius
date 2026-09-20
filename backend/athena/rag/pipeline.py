@@ -90,7 +90,10 @@ GEMINI_EMBED_MODEL  = "models/gemini-embedding-001"
 GEMINI_EMBED_URL    = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 # EMBED_MODEL is what gets written to the manifest — set by the active embedder
-EMBED_MODEL = OLLAMA_EMBED_MODEL  # default; overridden if Ollama is unavailable
+# Priority: LocalEmbedder (sentence-transformers, CPU, no API key) →
+#           OllamaEmbedder (local dev) → GeminiEmbedder (cloud fallback)
+LOCAL_EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+EMBED_MODEL = LOCAL_EMBED_MODEL  # default; overridden if local ST is unavailable
 
 
 # Separators for RecursiveCharacterTextSplitter, in priority order:
@@ -269,7 +272,35 @@ import urllib.request
 import json as _json
 
 
-class OllamaEmbedder:
+# ─────────────────────────────────────────────────────────────────────────────
+# LocalEmbedder — sentence-transformers (offline, CPU, no API key)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class LocalEmbedder:
+    """
+    Embed text using sentence-transformers (all-MiniLM-L6-v2 by default).
+
+    Runs fully offline on CPU with no external service or API key.
+    ``sentence-transformers`` is already listed in requirements.txt, so this
+    embedder is always available in the Docker container.
+
+    Dimension: 384 (all-MiniLM-L6-v2).
+    """
+
+    def __init__(self, model: str = LOCAL_EMBED_MODEL):
+        from sentence_transformers import SentenceTransformer  # lazy import
+        self.model = model
+        self._m = SentenceTransformer(model)
+        log.info("LocalEmbedder ready | model=%s", model)
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        """Embed a list of strings; returns normalised float vectors."""
+        return self._m.encode(texts, normalize_embeddings=True).tolist()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Embedding backends — OllamaEmbedder (offline-first) / GeminiEmbedder (cloud)
+# ─────────────────────────────────────────────────────────────────────────────
     """
     Embed text using the local Ollama server's embedding endpoint.
     Uses nomic-embed-text by default — a 137 M parameter model that runs
@@ -373,15 +404,31 @@ class GeminiEmbedder:
         return all_embeddings
 
 
-def build_embedder() -> OllamaEmbedder | GeminiEmbedder:
+def build_embedder() -> "LocalEmbedder | OllamaEmbedder | GeminiEmbedder":
     """
-    Return an OllamaEmbedder if Ollama is running and nomic-embed-text is
-    available; otherwise fall back to GeminiEmbedder.
+    Return the best available embedder in priority order:
 
-    Also updates the module-level EMBED_MODEL so the build manifest records
-    the actual embedder used.
+    1. LocalEmbedder (sentence-transformers, CPU, no API key) — always available
+       in the Docker container. Used for the hosted Nebius build.
+    2. OllamaEmbedder (nomic-embed-text) — local dev with Ollama running.
+    3. GeminiEmbedder — cloud fallback when neither local option is available.
+
+    IMPORTANT: Query and build must use the same embedder model. The build
+    manifest records which model was used so a mismatch forces a rebuild.
     """
     global EMBED_MODEL
+
+    # 1. sentence-transformers (preferred — works everywhere, no service needed)
+    try:
+        embedder = LocalEmbedder()
+        EMBED_MODEL = embedder.model
+        return embedder
+    except Exception as exc:
+        log.warning(
+            "LocalEmbedder unavailable (%s) — trying Ollama.", exc
+        )
+
+    # 2. Ollama (local dev)
     try:
         embedder = OllamaEmbedder()
         EMBED_MODEL = embedder.model
@@ -390,7 +437,8 @@ def build_embedder() -> OllamaEmbedder | GeminiEmbedder:
         log.warning(
             "Ollama embedder unavailable (%s) — falling back to Gemini cloud embedding.", exc
         )
-    # Gemini cloud fallback
+
+    # 3. Gemini cloud fallback
     embedder = GeminiEmbedder()
     EMBED_MODEL = embedder.model
     return embedder

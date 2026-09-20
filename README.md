@@ -1,6 +1,116 @@
-# 🛰️ Aero-Astra — Autonomous Satellite Fault Management System
+# 🛰️ Aero-Astra: Autonomous Satellite Fault Management on Nebius + NVIDIA Nemotron
 
-A real-time, multi-agent AI system for satellite anomaly detection, root-cause diagnosis, and autonomous mitigation planning. Built on a **FastAPI** backend with a **React/Vite** frontend, it orchestrates five specialist AI agents over a live WebSocket telemetry stream.
+**Track:** Best Apps and Agents — Nebius × NVIDIA Global AI Hackathon  
+**Live demo:** _\<public URL — fill in after Nebius deployment\>_  
+**Demo video:** _\<YouTube URL — fill in after recording\>_  
+**License:** MIT
+
+---
+
+## The problem
+
+LEO satellite operators cannot staff a ground pass for every anomaly. Current automated responses are rule-based and brittle; LLM agents that invent root causes or hallucinate safety numbers are unusable in this setting. Aero-Astra answers that directly: a multi-agent pipeline where every root cause comes from a dependency-graph candidate set, every safety score comes from a deterministic Monte Carlo simulator, and a five-rule GUARDIAN gate blocks unsafe actions before any recommendation reaches the operator.
+
+> **What is simulated:** satellite telemetry is produced by a physics simulator with six injected fault types. No real satellite hardware is connected.
+
+---
+
+## What it does
+
+Seven cooperating agents run a full incident autonomously:
+
+| Agent | Role |
+|---|---|
+| **SENTINEL** | Anomaly detection (XGBoost flatline + physics threshold + residual correlation) |
+| **SHERLOCK** | Graph-constrained root-cause diagnosis via Nemotron on Nebius Token Factory |
+| **ORACLE** | Monte Carlo safety simulation over the recovery action catalog |
+| **ATHENA** | Recovery plan synthesis via Nemotron on Nebius Token Factory |
+| **GUARDIAN** | Deterministic 5-rule safety gate (no LLM) |
+| **SCRIBE** | Audit runbook compiler |
+| **CHRONICLE** | Persistent event log |
+
+---
+
+## How Nebius and NVIDIA are used
+
+| Component | Model | Where it runs | Why |
+|---|---|---|---|
+| SHERLOCK (root cause) | _\<NEBIUS_MODEL_SHERLOCK — fill in slug\>_ | Nebius Token Factory | Graph-constrained classification; Nemotron's instruction-following keeps the response within the candidate set |
+| ATHENA (recovery plan) | _\<NEBIUS_MODEL_ATHENA — fill in slug\>_ | Nebius Token Factory | Verbose 4096-token JSON planning; needs a larger, structured-output-capable model |
+| App hosting | — | Nebius AI Cloud | CPU-only VM (no GPU needed — inference is on Token Factory) |
+
+> **Measured:** _\<fill in SHERLOCK median latency, ATHENA median latency, first-attempt JSON validity % over N runs after smoke testing\>_
+
+---
+
+## Why the LLM cannot hallucinate its way into a bad recovery
+
+1. Root cause must come from a dependency-graph candidate set, validated in code (SHERLOCK Phase 3)
+2. The LLM never outputs safety scores — ORACLE's Monte Carlo scores are injected after plan validation
+3. Irreversibility flags come from a hardcoded lookup, never from the LLM
+4. GUARDIAN is a deterministic 5-rule gate with no LLM involvement
+
+---
+
+## Run it
+
+### Hosted (Nebius AI Cloud)
+_\<URL — fill in after deployment\>_
+
+### Locally (Nebius Token Factory for LLM, no local GPU needed)
+
+```bash
+git clone https://github.com/Meet-Shah10/Aero_Astra_Nebius.git
+cd Aero_Astra_Nebius
+git checkout nebius-submission
+
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+cp .env.example .env
+# Edit .env: fill in NEBIUS_API_KEY, NEBIUS_BASE_URL,
+#            NEBIUS_MODEL_SHERLOCK, NEBIUS_MODEL_ATHENA
+# Set NEBIUS_ONLY=1 to disable all non-Nebius providers.
+
+python backend/api.py         # Tab 1
+npm install && npm run dev    # Tab 2
+```
+
+### Docker (Nebius AI Cloud VM)
+
+```bash
+cp .env.example .env  # fill in NEBIUS_* values
+docker compose up -d --build
+# Open http://<server-ip> in your browser
+# Verify: curl http://<server-ip>/health
+```
+
+---
+
+## What is real and what is simulated
+
+| Layer | Status |
+|---|---|
+| Satellite telemetry | **Simulated** — physics simulator, six injected fault types |
+| LLM inference (SHERLOCK, ATHENA) | **Real** — live calls to Nebius Token Factory (Nemotron) |
+| Monte Carlo safety simulation (ORACLE) | **Real** — deterministic runs in-process |
+| Validation and gating logic | **Real** — graph checks, Pydantic schemas, GUARDIAN rules |
+| SENTINEL XGBoost flatline detector | **Real** — trained on OPS-SAT telemetry data (Zenodo) |
+| FDIR knowledge base (RAG) | **Curated** — 20 passages written for this project, modeled on NASA fault management practice (not retrieved from the handbook itself) |
+
+---
+
+## What changed during the hackathon
+
+See [CHANGELOG_SUBMISSION.md](./CHANGELOG_SUBMISSION.md).
+
+---
+
+## Credits and licenses
+
+- Satellite 3D model: [`simple_satellite_low_poly_free.glb`](https://sketchfab.com) — verify source license and add attribution
+- Earth textures (`public/textures/earth/`): verify three.js / NASA source licenses and add attribution
+- OPS-SAT dataset: Zenodo — see SENTINEL training scripts for citation
 
 ---
 
@@ -35,182 +145,49 @@ Agents are **manually activated** from the UI — SENTINEL and CHRONICLE run con
 
 ---
 
-## Prerequisites
-
-### Hardware
-| Requirement | Minimum | Recommended |
-|---|---|---|
-| CPU | Any modern x86-64 or ARM64 | Apple Silicon (M1/M2/M3/M4) |
-| RAM | 8 GB | 16 GB |
-| Disk | 20 GB free | 40 GB free |
-| GPU | — | Apple Silicon unified memory (for MLX) |
-
-> **Note:** MLX local inference only works on **Apple Silicon Macs**. On other hardware the backend automatically falls back to **Ollama**, **OpenRouter**, or **NVIDIA NIM** (see LLM Providers below).
-
-### Software
-
-| Tool | Version | Install |
-|---|---|---|
-| Python | 3.11 – 3.13 | [python.org](https://python.org) or `brew install python` |
-| Node.js | 18+ | [nodejs.org](https://nodejs.org) or `brew install node` |
-| npm | 9+ | Bundled with Node.js |
-| git | any | `brew install git` |
-
----
-
-## Setup
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/Meet-Shah10/Aero_Astra.git
-cd Aero_Astra
-```
-
-### 2. Python environment
-
-```bash
-# Create and activate a virtual environment (recommended)
-python3 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-
-# Install Python dependencies
-pip install -r requirements.txt
-```
-
-### 3. Node / Frontend dependencies
-
-```bash
-npm install
-```
-
-### 4. Environment variables
-
-Create a `.env` file in the project root. Only the providers you actually want to use need keys — the backend tries them in order and falls back automatically.
-
-```env
-# ── OpenRouter (cloud LLM fallback) ──────────────────────────────
-OPENROUTER_API_KEY=sk-or-...
-
-# ── NVIDIA NIM (optional cloud fallback) ─────────────────────────
-NVIDIA_API_KEY=nvapi-...
-
-# ── Ollama (local, no key needed — install from https://ollama.ai) ──
-# No key required. Run: ollama pull llama3.2:3b && ollama pull mistral-nemo:12b
-```
-
-> At least one provider must be reachable. For a fully **offline** setup, install Ollama and pull the models — no API keys needed.
-
-### 5. LLM Providers (choose one or more)
-
-The backend tries providers in this priority order:
-
-| Priority | Provider | When to use |
-|---|---|---|
-| 1 | **MLX-LM** (local, Apple Silicon) | Fastest; requires model download (Step 6) |
-| 2 | **Ollama** (local, any OS) | Good offline option; no GPU required |
-| 3 | **OpenRouter** | Cloud fallback; needs `OPENROUTER_API_KEY` |
-| 4 | **NVIDIA NIM** | Cloud fallback; needs `NVIDIA_API_KEY` |
-
-#### Option A — MLX local inference (Apple Silicon only)
-
-Download quantised model weights (~2–5 GB each):
-
-```bash
-bash mlx_setup.sh
-```
-
-Or manually with the MLX CLI:
-
-```bash
-pip install mlx-lm
-mlx_lm.convert --hf-path meta-llama/Llama-3.2-3B-Instruct -q --q-bits 4 \
-    --mlx-path backend/models/llama3.2-3b-4bit
-mlx_lm.convert --hf-path meta-llama/Llama-3.2-1B-Instruct -q --q-bits 4 \
-    --mlx-path backend/models/llama3.2-1b-4bit
-mlx_lm.convert --hf-path meta-llama/Llama-3.1-8B-Instruct -q --q-bits 4 \
-    --mlx-path backend/models/llama3.1-8b-4bit
-```
-
-#### Option B — Ollama (any OS)
-
-```bash
-# Install Ollama from https://ollama.ai, then:
-ollama pull llama3.2:3b        # for SHERLOCK
-ollama pull mistral-nemo:12b   # for ATHENA
-```
-
----
-
-## Running the System
-
-Open **three terminal tabs**:
-
-### Tab 1 — MLX inference servers (Apple Silicon only, skip for Ollama/cloud)
-
-```bash
-python backend/mlx_servers.py
-# Starts SHERLOCK server on :8080 and ATHENA server on :8081
-```
-
-### Tab 2 — FastAPI backend
-
-```bash
-python backend/api.py
-# Runs on http://localhost:8000
-# WebSocket: ws://localhost:8000/ws
-```
-
-### Tab 3 — React frontend
-
-```bash
-npm run dev
-# Opens at http://localhost:5173
-```
-
-Navigate to **http://localhost:5173** in your browser.
-
----
-
 ## Usage Flow
 
 1. **Launch** — the dashboard loads and the telemetry replay begins streaming.
-2. **Wait for SENTINEL** — within ~6 seconds, SENTINEL detects the injected fault. The stream **freezes** at the fault frame and the agent console highlights.
-3. **Click SHERLOCK** — navigate to the SHERLOCK agent page and click **▶ Activate SHERLOCK**. The LLM diagnoses the root cause. The stream resumes automatically.
-4. **Click ATHENA** — navigate to the ATHENA page and click **▶ Activate ATHENA**. ORACLE runs a Monte-Carlo simulation, then ATHENA generates a mitigation plan.
-5. **GUARDIAN** fires automatically after SHERLOCK — it classifies the severity tier (`AUTOMATED_GUARDED`, `MANUAL_INTERLOCK`, or `AUTONOMOUS_SAFED`).
-6. **Approve & execute** — on the GUARDIAN page, approve the plan. SCRIBE compiles the audit runbook, which can be downloaded as a `.txt` file.
+2. **Wait for SENTINEL** — within ~6 seconds, SENTINEL detects the injected fault. The stream **freezes** at the fault frame.
+3. **Click SHERLOCK** — navigate to SHERLOCK page and click **▶ Activate SHERLOCK**. Nemotron on Token Factory diagnoses the root cause.
+4. **Click ATHENA** — ORACLE runs Monte Carlo simulation, then ATHENA (Nemotron) generates a recovery plan.
+5. **GUARDIAN** fires automatically — classifies severity tier (`AUTOMATED_GUARDED`, `MANUAL_INTERLOCK`, or `AUTONOMOUS_SAFED`).
+6. **Approve & execute** — SCRIBE compiles the audit runbook.
 
 ---
 
 ## Project Structure
 
 ```
-Aero_Astra/
+Aero_Astra_Nebius/
 ├── backend/
-│   ├── api.py                  # FastAPI app — WebSocket, endpoints, replay loop
-│   ├── mlx_servers.py          # Launches MLX-LM inference servers
+│   ├── api.py                  # FastAPI app — WebSocket, /health endpoint, replay loop
+│   ├── nebius.py               # Nebius Token Factory provider factory
 │   ├── llm_client.py           # Multi-provider LLM client with fallback chain
 │   ├── sherlock/               # SHERLOCK agent (root-cause diagnosis)
-│   │   ├── agent.py
+│   │   ├── agent.py            # Nebius → MLX → Ollama provider chain
 │   │   ├── prompts.py
 │   │   └── graph.py            # Satellite dependency graph (6 nodes, 18 edges)
 │   ├── athena/                 # ATHENA agent (mitigation planning + RAG)
-│   │   ├── agent.py
-│   │   └── rag/                # NASA-HDBK-1002 vectorstore
-│   ├── sentinel/               # SENTINEL anomaly detectors (Engine A/B/C)
-│   ├── oracle/                 # ORACLE Monte-Carlo simulator
+│   │   ├── agent.py            # Nebius → NVIDIA NIM → Ollama provider chain
+│   │   └── rag/                # FDIR knowledge base (sentence-transformers vectorstore)
+│   ├── sentinel/               # SENTINEL anomaly detectors
+│   ├── oracle/                 # ORACLE Monte Carlo simulator
 │   ├── simulator/              # Physics-based satellite telemetry engine
-│   ├── replay/                 # Pre-recorded telemetry playlist (playlist.json)
-│   └── models/                 # Sentinel ML models + MLX weights (gitignored)
+│   └── replay/                 # Pre-recorded telemetry playlist (playlist.json)
+├── scripts/
+│   └── nebius_smoke_test.py    # Proves real Token Factory calls work
 ├── src/
+│   ├── config.js               # Central WebSocket URL config (no hardcoded localhost)
 │   ├── App.jsx                 # Root React component, WebSocket state machine
-│   ├── components/
-│   │   ├── AgentDetailPage.jsx # Per-agent detail views + activation buttons
-│   │   ├── oracle/             # 3-D orbital visualiser
-│   │   └── sandbox/            # Simulation sandbox (digital twin)
-│   └── index.css
-├── public/
+│   └── components/
+├── Dockerfile                  # Backend container (python:3.12-slim)
+├── Dockerfile.web              # Frontend container (Node 20 + nginx)
+├── docker-compose.yml          # Backend + web services
+├── nginx.conf                  # SPA routing + WebSocket proxy
+├── .env.example                # Env var template — copy to .env and fill in
+├── CHANGELOG_SUBMISSION.md     # Changes made during the submission period
+├── LICENSE                     # MIT
 ├── requirements.txt
 ├── package.json
 └── vite.config.js
@@ -222,15 +199,15 @@ Aero_Astra/
 
 | Symptom | Fix |
 |---|---|
-| `Out of diskspace` on `git add` | Free disk space; MLX models can be 5–10 GB each |
-| Screen goes black on agent click | Ensure backend is running; check browser console for JS errors |
+| `RuntimeError: NEBIUS_ONLY=1 but env vars missing` | Fill in `NEBIUS_API_KEY`, `NEBIUS_BASE_URL`, `NEBIUS_MODEL_SHERLOCK`, `NEBIUS_MODEL_ATHENA` in `.env` |
+| Backend `ModuleNotFoundError` | Run `pip install -r requirements.txt` in a fresh venv |
 | SHERLOCK button not appearing | Wait for SENTINEL to fire (~6 s after backend start) |
-| `LLM call failed` in backend logs | Check `.env` keys; or start Ollama as a fallback |
-| ChromaDB collection empty | Delete `backend/athena/rag/vectorstore/` and restart backend to rebuild |
-| Port 8080/8081 already in use | Kill any leftover `mlx_lm.server` processes: `pkill -f mlx_lm` |
+| RAG vectorstore empty | Delete `backend/athena/rag/vectorstore/` and restart backend to auto-reseed |
+| `ws://` blocked on `https://` page | Set up TLS (e.g. Caddy) — nginx proxies `wss://` automatically when behind HTTPS |
+| Port conflict | `lsof -i :8000` and kill the conflicting process |
 
 ---
 
 ## License
 
-MIT
+MIT — see [LICENSE](./LICENSE)
