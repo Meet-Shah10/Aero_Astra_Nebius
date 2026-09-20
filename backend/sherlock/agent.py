@@ -5,19 +5,25 @@ Agent 3 of AERO-ASTRA | Root-Cause Diagnosis
 Orchestrates the three-phase diagnosis pipeline:
   Phase 1 (Graph)       — deterministic, no LLM. Computes physically-valid
                           root cause candidates using the dependency graph.
-  Phase 2 (LLM)         — constrained. Claude/Gemini (via OpenRouter) reasons
-                          over the candidate set and observed telemetry to
-                          produce a JSON diagnosis.
+  Phase 2 (LLM)         — constrained. Nemotron (via Nebius Token Factory)
+                          reasons over the candidate set and observed telemetry
+                          to produce a JSON diagnosis.
   Phase 3 (Validation)  — deterministic, no LLM. Validates that the response
                           is (a) valid JSON, (b) passes Pydantic schema, and
                           (c) the claimed root cause is within the graph
                           candidate set. Retries with corrective reprompts on
                           any failure. Fails loudly if all retries exhaust.
 
+Provider chain (in priority order):
+  1. Nebius Token Factory — NEBIUS_API_KEY + NEBIUS_MODEL_SHERLOCK (Nemotron)
+  2. MLX-LM port 8080    — local Apple Silicon (dev only, skipped if NEBIUS_ONLY=1)
+  3. Ollama              — local fallback (dev only, skipped if NEBIUS_ONLY=1)
+  4. OpenRouter / NVIDIA — cloud fallback (dev only, skipped if NEBIUS_ONLY=1)
+
 Usage:
     from backend.sherlock import SherlockAgent, AnomalyEvent
 
-    agent = SherlockAgent()  # uses OPENROUTER_API_KEY env var
+    agent = SherlockAgent()  # picks up NEBIUS_* env vars automatically
     diagnosis = agent.diagnose(event)
     print(diagnosis.model_dump_json(indent=2))
 """
@@ -32,6 +38,7 @@ from typing import Any
 
 from openai import OpenAI
 from backend.llm_client import build_clients, call_llm_with_fallback, LLMProvider
+from backend.nebius import nebius_only, nebius_provider
 from pydantic import ValidationError
 
 from .graph import SatelliteGraph, DEFAULT_CANDIDATE_DEPTH
@@ -57,8 +64,8 @@ log = logging.getLogger(__name__)
 # Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Env vars used: OPENROUTER_API_KEY (primary), NVIDIA_API_KEY (fallback)
-# Models: google/gemini-2.5-flash → meta/llama-3.1-70b-instruct
+# Primary: Nebius Token Factory — NEBIUS_API_KEY + NEBIUS_MODEL_SHERLOCK
+# Dev fallbacks (skipped when NEBIUS_ONLY=1): MLX-LM → Ollama → OpenRouter → NVIDIA NIM
 DEFAULT_MODEL        = "google/gemini-2.5-flash"
 DEFAULT_TEMPERATURE  = 0.1   # Near-deterministic — safety-relevant agent
 DEFAULT_MAX_TOKENS   = 2048              # enough for full SherlockDiagnosis JSON
@@ -98,14 +105,28 @@ class SherlockAgent:
         candidate_depth: int = DEFAULT_CANDIDATE_DEPTH,
         telemetry_provider: TelemetryProvider | None = None,
     ) -> None:
-        # Build multi-provider fallback chain:
-        # Priority: MLX-LM port 8080 (Llama 3.2 speculative) → Ollama → OpenRouter → NVIDIA NIM
-        # Constraint: mlx_port=8080 ensures the tokenizer family stays in the Llama 3.2 line.
-        self._providers: list[LLMProvider] = build_clients(
-            mlx_port=8080,
-            ollama_model=ollama_model,
-            openrouter_model=model,
-        )
+        # ── Provider chain ─────────────────────────────────────────────────────
+        # 1. Nebius Token Factory (Nemotron) — primary for demo, video, and hosted build.
+        #    When NEBIUS_ONLY=1 this is the ONLY provider; all others are skipped.
+        # 2. MLX-LM / Ollama / OpenRouter / NVIDIA NIM — dev-only fallbacks.
+        nebius = nebius_provider("NEBIUS_MODEL_SHERLOCK", timeout_s=90)
+        if nebius_only():
+            # Demo / hosted mode: hard-fail if Token Factory is not configured.
+            if nebius is None:
+                raise RuntimeError(
+                    "NEBIUS_ONLY=1 but NEBIUS_MODEL_SHERLOCK / NEBIUS_API_KEY / "
+                    "NEBIUS_BASE_URL are not set. Check your .env."
+                )
+            self._providers: list[LLMProvider] = [nebius]
+        else:
+            # Development mode: Nebius first (if configured), then local/cloud fallbacks.
+            dev_providers = build_clients(
+                mlx_port=8080,
+                ollama_model=ollama_model,
+                openrouter_model=model,
+            )
+            self._providers = ([nebius] if nebius else []) + dev_providers
+
         self._temperature = temperature
         self._max_retries = max_retries
         self._candidate_depth = candidate_depth
@@ -288,17 +309,31 @@ class SherlockAgent:
         Attempt to parse raw string as JSON.
         Returns (parsed_dict, None) on success, (None, error_string) on failure.
 
-        Also strips markdown code fences if the LLM wrapped JSON in ```json ... ```.
+        Handles three LLM output patterns:
+        1. Markdown fences — ```json { ... } ```
+        2. Reasoning preamble — Nemotron/thinking models emit text before the
+           JSON object. Extract from the first '{' to the last '}'.
+        3. Schema-envelope echo — some models echo the JSON Schema rather than
+           returning a flat instance; detected and unwrapped.
         """
         cleaned = raw.strip()
-        # Strip ```json ... ``` or ``` ... ``` wrapping
+
+        # ── Pass 1: strip markdown code fences ───────────────────────────────
         if cleaned.startswith("```"):
             lines = cleaned.split("\n")
-            # Remove first line (```json or ```) and last line (```)
             inner_lines = lines[1:] if len(lines) > 1 else lines
             if inner_lines and inner_lines[-1].strip() == "```":
                 inner_lines = inner_lines[:-1]
             cleaned = "\n".join(inner_lines).strip()
+
+        # ── Pass 2: brace extraction (Nemotron reasoning preamble) ───────────
+        # If the text still does not start with '{', extract from the first '{'
+        # to the last '}'. This matches how ATHENA's _try_parse_json works.
+        if not cleaned.startswith("{"):
+            start = cleaned.find("{")
+            end   = cleaned.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                cleaned = cleaned[start : end + 1]
 
         try:
             parsed = json.loads(cleaned)
