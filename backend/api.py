@@ -371,6 +371,10 @@ def build_fallback_options(oracle_response) -> list[dict]:
 
 app = FastAPI(title="AERO-ASTRA Streaming Bridge")
 
+# Record startup time for the /health endpoint uptime field.
+import time as _time
+_APP_START = _time.time()
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -933,6 +937,51 @@ async def startup_event():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Health endpoint
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/health")
+async def health():
+    """
+    Liveness + configuration probe.
+
+    Returns provider names, model slugs, RAG doc count, and uptime so judges
+    (and the demo video) can confirm Nebius Token Factory calls are real.
+    """
+    import time as _t
+    from backend.nebius import nebius_only
+
+    sherlock_providers = [p.name for p in _sherlock_agent._providers] if _sherlock_agent else []
+    athena_providers   = [p.name for p in _athena_agent._providers]   if _athena_agent else []
+
+    sherlock_models = [
+        p.model for p in _sherlock_agent._providers
+    ] if _sherlock_agent else []
+    athena_models = [
+        p.model for p in _athena_agent._providers
+    ] if _athena_agent else []
+
+    rag_docs = 0
+    rag_embed = "unknown"
+    if _athena_agent and _athena_agent._rag and _athena_agent._rag._collection:
+        rag_docs = _athena_agent._rag._collection.count()
+    try:
+        from backend.athena.rag.pipeline import EMBED_MODEL as _em
+        rag_embed = _em
+    except Exception:
+        pass
+
+    return {
+        "status": "ok",
+        "uptime_s": round(_t.time() - _APP_START, 1),
+        "nebius_only": nebius_only(),
+        "sherlock": {"providers": sherlock_providers, "models": sherlock_models},
+        "athena":   {"providers": athena_providers,   "models": athena_models},
+        "rag": {"doc_count": rag_docs, "embed_model": rag_embed},
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Manual Agent Trigger Endpoints
 # Called by the frontend "Activate" buttons on the SHERLOCK and ATHENA pages.
 # SENTINEL and CHRONICLE are always-on; agents below require explicit trigger.
@@ -982,6 +1031,9 @@ async def sherlock_trigger():
         "urgency":            diagnosis.urgency.value,
         "time_to_critical":   diagnosis.time_to_critical_estimate_minutes,
         "reasoning":          diagnosis.reasoning,
+        # Provenance — confirms which Nebius Token Factory model answered
+        "llm_provider": _sherlock_agent._providers[0].name  if (_sherlock_agent and _sherlock_agent._providers) else "unknown",
+        "llm_model":    _sherlock_agent._providers[0].model if (_sherlock_agent and _sherlock_agent._providers) else "unknown",
     })
 
     # GUARDIAN (deterministic, auto-fires after SHERLOCK)
@@ -1108,6 +1160,9 @@ async def athena_trigger():
                 }
                 for o in athena_plan.options
             ],
+            # Provenance — confirms which Nebius Token Factory model answered
+            "llm_provider": _athena_agent._providers[0].name  if (_athena_agent and _athena_agent._providers) else "unknown",
+            "llm_model":    _athena_agent._providers[0].model if (_athena_agent and _athena_agent._providers) else "unknown",
         })
         # Resume the replay stream — both SHERLOCK + ATHENA are fully done
         if _replay_resume_event is not None:
@@ -1292,4 +1347,4 @@ async def sandbox_websocket(websocket: WebSocket):
 
 
 if __name__ == "__main__":
-    uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("backend.api:app", host="0.0.0.0", port=8000, reload=True)
