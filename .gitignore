@@ -70,3 +70,6 @@ patch*.cjs
 patch_*.cjs
 test-import.js
 *.log
+
+# Generated RAG vectorstore — rebuilt at runtime, never committed
+backend/athena/rag/vectorstore/
