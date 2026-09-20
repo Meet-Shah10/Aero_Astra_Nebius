@@ -459,6 +459,31 @@ class AthenaRAGPipeline:
             self._embedder = build_embedder()
         return self._embedder
 
+    def _embedder_matches_store(self, embedder: OllamaEmbedder | GeminiEmbedder) -> bool:
+        """
+        Return True if the live embedder's model matches the build-manifest
+        embed_model. On mismatch, log a warning and return False so callers
+        skip retrieval instead of raising a Chroma dimension error
+        (e.g. nomic-768 store vs Gemini-3072 query).
+        """
+        manifest = _load_manifest()
+        if manifest is None:
+            return True
+        store_model = manifest.get("embed_model")
+        if not store_model:
+            return True
+        live_model = embedder.model
+        if live_model != store_model:
+            log.warning(
+                "RAG embedder mismatch: vectorstore built with '%s' but live "
+                "embedder is '%s'. Skipping retrieval to avoid dimension error "
+                "(rebuild the vectorstore or restore the original embedder).",
+                store_model,
+                live_model,
+            )
+            return False
+        return True
+
     def is_ready(self) -> bool:
         """
         Return True if the vectorstore is populated AND the manifest confirms
@@ -627,8 +652,10 @@ class AthenaRAGPipeline:
             log.warning("RAG vectorstore not built — returning empty context. Call .build() first.")
             return ""
 
-        # Embed the query
+        # Embed the query (skip if live model ≠ store model — avoids dim crash)
         embedder = self._get_embedder()
+        if not self._embedder_matches_store(embedder):
+            return ""
         query_vector = embedder.embed([query])[0]
 
         # Search ChromaDB
@@ -670,6 +697,8 @@ class AthenaRAGPipeline:
             return []
 
         embedder = self._get_embedder()
+        if not self._embedder_matches_store(embedder):
+            return []
         query_vector = embedder.embed([query])[0]
 
         results = self._collection.query(
