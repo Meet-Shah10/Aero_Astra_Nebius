@@ -304,16 +304,76 @@ class SherlockAgent:
         log.info("LLM raw response (first 500 chars): %s", raw[:500])
         return raw
 
+    @staticmethod
+    def _extract_last_balanced_json(text: str) -> str | None:
+        """
+        Find the last complete, brace-balanced JSON object in text.
+
+        Thinking/reasoning models (e.g. Nemotron-3_5-Lightning) emit a
+        chain-of-thought preamble that may itself contain {}-like fragments
+        (e.g. "Start with { and end with }."). The naive first-{/last-}
+        extractor grabs the wrong window. This method walks backward from the
+        last '}' in the text and depth-matches to its opening '{', so it
+        always isolates the LAST complete JSON object — which is where thinking
+        models place their actual structured output.
+        """
+        search_end = len(text)
+        while search_end > 0:
+            end = text.rfind("}", 0, search_end)
+            if end == -1:
+                return None
+
+            # Walk backward tracking depth to find the matching opening brace.
+            depth     = 0
+            in_string = False
+            escape    = False
+            match_start = -1
+            for i in range(end, -1, -1):
+                ch = text[i]
+                if escape:
+                    escape = False
+                    continue
+                if ch == "\\" and in_string:
+                    escape = True
+                    continue
+                if ch == '"':
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
+                if ch == "}":
+                    depth += 1
+                elif ch == "{":
+                    depth -= 1
+                    if depth == 0:
+                        match_start = i
+                        break
+
+            if match_start != -1:
+                candidate = text[match_start : end + 1]
+                try:
+                    json.loads(candidate)   # validate it parses cleanly
+                    return candidate
+                except json.JSONDecodeError:
+                    pass  # malformed — try the next } further left
+
+            search_end = end  # move left and retry
+
+        return None
+
     def _try_parse_json(self, raw: str) -> tuple[dict[str, Any] | None, str | None]:
         """
         Attempt to parse raw string as JSON.
         Returns (parsed_dict, None) on success, (None, error_string) on failure.
 
-        Handles three LLM output patterns:
+        Handles four LLM output patterns:
         1. Markdown fences — ```json { ... } ```
-        2. Reasoning preamble — Nemotron/thinking models emit text before the
-           JSON object. Extract from the first '{' to the last '}'.
-        3. Schema-envelope echo — some models echo the JSON Schema rather than
+        2. Direct JSON — starts with '{'
+        3. Reasoning preamble — Nemotron/thinking models emit reasoning text
+           BEFORE the JSON. Uses reverse brace-matching to extract the LAST
+           complete balanced JSON object in the response, which is where
+           thinking models always place their structured output.
+        4. Schema-envelope echo — some models echo the JSON Schema rather than
            returning a flat instance; detected and unwrapped.
         """
         cleaned = raw.strip()
@@ -326,34 +386,44 @@ class SherlockAgent:
                 inner_lines = inner_lines[:-1]
             cleaned = "\n".join(inner_lines).strip()
 
-        # ── Pass 2: brace extraction (Nemotron reasoning preamble) ───────────
-        # If the text still does not start with '{', extract from the first '{'
-        # to the last '}'. This matches how ATHENA's _try_parse_json works.
-        if not cleaned.startswith("{"):
-            start = cleaned.find("{")
-            end   = cleaned.rfind("}")
-            if start != -1 and end != -1 and end > start:
-                cleaned = cleaned[start : end + 1]
+        # ── Pass 2: direct parse (happy path) ────────────────────────────────
+        if cleaned.startswith("{"):
+            try:
+                parsed = json.loads(cleaned)
+                if isinstance(parsed, dict):
+                    if (
+                        parsed.get("type") == "object"
+                        and isinstance(parsed.get("properties"), dict)
+                        and isinstance(parsed.get("required"), list)
+                    ):
+                        parsed = parsed["properties"]
+                    return parsed, None
+            except json.JSONDecodeError:
+                pass  # fall through to extraction passes
 
-        try:
-            parsed = json.loads(cleaned)
-            if not isinstance(parsed, dict):
-                return None, f"Expected JSON object, got {type(parsed).__name__}"
+        # ── Pass 3: reverse brace-match (thinking-model preamble) ────────────
+        # Thinking models (Nemotron-3_5-Lightning, DeepSeek-R1, etc.) emit a
+        # reasoning chain BEFORE the JSON. Naive first-{/last-} extraction
+        # picks up prose fragments like "Start with { and end with }.".
+        # _extract_last_balanced_json walks backward from the final '}' to
+        # find the last complete, parseable JSON object instead.
+        candidate = self._extract_last_balanced_json(cleaned)
+        if candidate is not None:
+            try:
+                parsed = json.loads(candidate)
+                if not isinstance(parsed, dict):
+                    return None, f"Expected JSON object, got {type(parsed).__name__}"
+                if (
+                    parsed.get("type") == "object"
+                    and isinstance(parsed.get("properties"), dict)
+                    and isinstance(parsed.get("required"), list)
+                ):
+                    parsed = parsed["properties"]
+                return parsed, None
+            except json.JSONDecodeError as e:
+                return None, str(e)
 
-            # ── Schema-envelope unwrap ─────────────────────────────────────────
-            # Small models sometimes echo the JSON Schema structure back instead
-            # of returning a flat instance. Detect and unwrap:
-            #   { "type": "object", "required": [...], "properties": { ... } }
-            if (
-                parsed.get("type") == "object"
-                and isinstance(parsed.get("properties"), dict)
-                and isinstance(parsed.get("required"), list)
-            ):
-                parsed = parsed["properties"]
-
-            return parsed, None
-        except json.JSONDecodeError as e:
-            return None, str(e)
+        return None, "No JSON object found in response"
 
     def _try_validate_schema(
         self, parsed: dict[str, Any]
