@@ -35,11 +35,11 @@ Seven cooperating agents run a full incident autonomously:
 
 | Component | Model | Where it runs | Why |
 |---|---|---|---|
-| SHERLOCK (root cause) | _\<NEBIUS_MODEL_SHERLOCK — fill in slug\>_ | Nebius Token Factory | Graph-constrained classification; Nemotron's instruction-following keeps the response within the candidate set |
-| ATHENA (recovery plan) | _\<NEBIUS_MODEL_ATHENA — fill in slug\>_ | Nebius Token Factory | Verbose 4096-token JSON planning; needs a larger, structured-output-capable model |
+| SHERLOCK (root cause) | `nvidia/Nemotron-3_5-Lightning` | Nebius Token Factory | Graph-constrained classification; Nemotron's instruction-following keeps the response within the candidate set |
+| ATHENA (recovery plan) | `nvidia/nemotron-3-super-120b-a12b` | Nebius Token Factory | Verbose 4096-token JSON planning; needs a larger, structured-output-capable model |
 | App hosting | — | Nebius AI Cloud | CPU-only VM (no GPU needed — inference is on Token Factory) |
 
-> **Measured:** _\<fill in SHERLOCK median latency, ATHENA median latency, first-attempt JSON validity % over N runs after smoke testing\>_
+> **Measured:** _\<fill in SHERLOCK median latency, ATHENA median latency, first-attempt JSON validity % over N runs after running `python scripts/nebius_smoke_test.py` and a full incident\>_
 
 ---
 
@@ -98,6 +98,8 @@ docker compose up -d --build
 | SENTINEL XGBoost flatline detector | **Real** — trained on OPS-SAT telemetry data (Zenodo) |
 | FDIR knowledge base (RAG) | **Curated** — 20 passages written for this project, modeled on NASA fault management practice (not retrieved from the handbook itself) |
 
+> **Simulation transparency:** All telemetry shown in the UI is produced by a physics simulator (`backend/simulator/`). No real satellite hardware or live telemetry feeds are connected.
+
 ---
 
 ## What changed during the hackathon
@@ -108,37 +110,35 @@ See [CHANGELOG_SUBMISSION.md](./CHANGELOG_SUBMISSION.md).
 
 ## Credits and licenses
 
-- Satellite 3D model: [`simple_satellite_low_poly_free.glb`](https://sketchfab.com) — verify source license and add attribution
-- Earth textures (`public/textures/earth/`): verify three.js / NASA source licenses and add attribution
-- OPS-SAT dataset: Zenodo — see SENTINEL training scripts for citation
+- Satellite 3D model: `simple_satellite_low_poly_free.glb` — source from Sketchfab or equivalent; verify the license before publication and add author attribution here
+- Earth textures (`public/textures/earth/`): verify source license (three.js / NASA examples) and add attribution here
+- OPS-SAT dataset: ESA Zenodo (DOI: 10.5281/zenodo.5516890) — used to train the SENTINEL XGBoost flatline detector; see `backend/sentinel/train.py` for the citation
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        React / Vite  (port 5173)                │
-│  Dashboard · Agent Console · Oracle 3-D View · Sandbox         │
-└────────────────────┬────────────────────────────────────────────┘
-                     │  WebSocket  ws://localhost:8000/ws
-┌────────────────────▼────────────────────────────────────────────┐
-│                   FastAPI Backend  (port 8000)                   │
-│                                                                  │
-│  SENTINEL  ──►  SHERLOCK  ──►  ORACLE  ──►  ATHENA  ──►  GUARDIAN│
-│  (anomaly      (root-cause     (MC sim)    (mitigation  (safety  │
-│   detect)       diagnosis)                  planning)    gate)   │
-│                                                                  │
-│  CHRONICLE (always-on audit log)   SCRIBE (runbook compiler)    │
-└──────────┬──────────────────────────────────┬───────────────────┘
-           │  OpenAI-compat REST               │  OpenAI-compat REST
-  ┌────────▼────────┐                ┌─────────▼─────────┐
-  │  MLX-LM :8080   │                │  MLX-LM :8081     │
-  │  (SHERLOCK LLM) │                │  (ATHENA LLM)     │
-  └─────────────────┘                └───────────────────┘
-        Llama 3.2 3B-4bit                Llama 3.1 8B-4bit
-      + Llama 3.2 1B draft            (standard inference)
-     (speculative decoding)
+┌───────────────────────────────────────────────────────────────────┐
+│               React / Vite SPA  (port 5173 / nginx)               │
+│  Dashboard · Agent Console · Oracle View · Sandbox                │
+└─────────────────────┬─────────────────────────────────────────────┘
+                      │  WebSocket  wss://<host>/ws  (nginx proxy)
+┌─────────────────────▼─────────────────────────────────────────────┐
+│                   FastAPI Backend  (port 8000)                     │
+│                                                                    │
+│  SENTINEL ──► SHERLOCK ──► ORACLE ──► ATHENA ──► GUARDIAN         │
+│  (detect)   (Nemotron)  (MC sim)  (Nemotron)  (det. gate)         │
+│                                                                    │
+│  CHRONICLE (audit log)          SCRIBE (runbook compiler)         │
+└───────────────────────────────┬───────────────────────────────────┘
+                                │  OpenAI-compat HTTPS (NEBIUS_ONLY=1)
+              ┌─────────────────▼─────────────────────┐
+              │  Nebius Token Factory                  │
+              │  api.tokenfactory.nebius.com/v1         │
+              │  SHERLOCK: Nemotron-3_5-Lightning       │
+              │  ATHENA:   Nemotron-Super-120B-A12B     │
+              └───────────────────────────────────────┘
 ```
 
 Agents are **manually activated** from the UI — SENTINEL and CHRONICLE run continuously; SHERLOCK, ORACLE, and ATHENA fire only when the operator clicks **▶ Activate** on their respective pages.

@@ -53,7 +53,7 @@ const FAULT_SCENARIOS = {
     summary: 'Heat pipe failure — panel temperature climbs unbounded toward thermal limits.',
     rootCause: 'Heat Pipe Failure (TCS)',
     causalChain: ['TCS', 'ADCS', 'EPS'],
-    liveOverride: { tcsPanel: '76.3°C (+4.2°C/hr)', cpuUsage: '58%', epsLoad: '44%' },
+    liveOverride: { tcsPanel: '>49°C (RISING)', cpuUsage: '58%', epsLoad: '44%' },
   },
   signal_dropout: {
     key: 'signal_dropout',
@@ -63,7 +63,7 @@ const FAULT_SCENARIOS = {
     summary: 'Antenna/transponder fault drops signal below lock threshold.',
     rootCause: 'Antenna Fault (TT&C)',
     causalChain: ['TT&C', 'OBC'],
-    liveOverride: { commLink: '-114.7 dBm (LOSS)', cpuUsage: '39%', epsLoad: '35%' },
+    liveOverride: { commLink: '<-90 dBm (LOSS)', cpuUsage: '39%', epsLoad: '35%' },
   },
   thruster_fault: {
     key: 'thruster_fault',

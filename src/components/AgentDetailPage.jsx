@@ -484,7 +484,7 @@ function AthenaPage({ hasIncidentData, scenarioPhase, selectedMitigation, setSel
             <div className="athena-option-title">{i + 1}. {opt.action_name?.replaceAll('_', ' ')}</div>
             {opt.effectiveness_score != null && (
               <div className={`athena-option-meta ${opt.effectiveness_score >= 0.7 ? 'text-green' : 'text-red'}`}>
-                Nominal recovery: {Math.round(opt.effectiveness_score * 100)}%
+                Effectiveness (LLM-judged): {Math.round(opt.effectiveness_score * 100)}%
                 {opt.is_irreversible ? ' · IRREVERSIBLE' : ''}
               </div>
             )}
@@ -698,13 +698,13 @@ function VitalsPage({ isAnomaly, backendOnline, backendData }) {
           </div>
           <div className="vitals-stat">
             <span className="vitals-stat-label">TCS_TEMP</span>
-            <span>{isAnomaly ? '+4.2°C/hr' : 'Stable'}</span>
+            <span>{isAnomaly ? 'RISING (est.)' : 'Stable'}</span>
           </div>
           <div className="vitals-stat">
             <span className="vitals-stat-label">Attitude</span>
             <span>{isAnomaly ? 'DRIFT 0.3°' : 'Nominal'}</span>
           </div>
-          {isAnomaly && <div className="vitals-warning">⚠ WARNING: RUL ESTIMATE 12 ORBITS</div>}
+          {isAnomaly && <div className="vitals-warning">⚠ WARNING: ANOMALY IN PROGRESS — estimated RUL varies by fault</div>}
         </>
       )}
     </div>

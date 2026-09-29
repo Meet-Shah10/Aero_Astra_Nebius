@@ -648,6 +648,7 @@ async def replay_stream():
                         "mission_loss_rate": r.mc_result.mission_loss_rate,
                         "mean_final_battery_soc": r.mc_result.mean_final_battery_soc,
                         "std_final_battery_soc": r.mc_result.std_final_battery_soc,
+                        "outcome_counts": r.mc_result.outcome_counts,
                         "flags": r.flags,
                     }
                     for r in oracle_response.results
@@ -1119,6 +1120,7 @@ async def athena_trigger():
                 "mission_loss_rate":        r.mc_result.mission_loss_rate,
                 "mean_final_battery_soc":   r.mc_result.mean_final_battery_soc,
                 "std_final_battery_soc":    r.mc_result.std_final_battery_soc,
+                "outcome_counts":           r.mc_result.outcome_counts,
                 "flags":                    r.flags,
             }
             for r in oracle_response.results

@@ -17,7 +17,7 @@ const LABEL_SETS = {
     stack: { x: 12, y: 52 },
     labels: [
       { text: 'TCS', sub: 'Thermal Control' },
-      { text: 'TEMP RISING', sub: '+4.2°C/hr' },
+      { text: 'TEMP RISING', sub: 'rate est.' },
       { text: 'ANOMALY DETECTED', danger: true },
     ],
   },
@@ -26,7 +26,7 @@ const LABEL_SETS = {
     stack: { x: 80, y: 28 },
     labels: [
       { text: 'TT&C', sub: 'Comm Dish' },
-      { text: 'SIGNAL LOSS', sub: '-114.7 dBm' },
+      { text: 'SIGNAL LOSS', sub: 'below lock threshold' },
       { text: 'ANOMALY DETECTED', danger: true },
     ],
   },

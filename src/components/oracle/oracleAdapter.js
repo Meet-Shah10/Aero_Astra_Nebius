@@ -72,10 +72,26 @@ function mapBackendResult(r, rank, totalActions) {
   // Degraded = whatever is left after nominal success and mission loss.
   const degradedProb    = Math.max(0, 1 - successProb - missionLossProb);
 
-  const nominalCount     = Math.round(successProb     * n);
-  const missionLossCount = Math.round(missionLossProb * n);
-  const degradedCount    = Math.max(0, n - nominalCount - missionLossCount);
+  // DISTRIBUTION: use real MC outcome_counts when available; fall back to safety-score
+  // estimates only if the backend did not send raw counts (older API version).
+  let nominalCount, missionLossCount, degradedCount;
+  let distributionSource;
+  if (r.outcome_counts && typeof r.outcome_counts === 'object') {
+    nominalCount     = r.outcome_counts.nominal     ?? Math.round(successProb * n);
+    missionLossCount = r.outcome_counts.mission_loss ?? Math.round(missionLossProb * n);
+    degradedCount    = r.outcome_counts.degraded    ?? Math.max(0, n - nominalCount - missionLossCount);
+    distributionSource = 'real MC counts';
+  } else {
+    nominalCount     = Math.round(successProb     * n);
+    missionLossCount = Math.round(missionLossProb * n);
+    degradedCount    = Math.max(0, n - nominalCount - missionLossCount);
+    distributionSource = 'est. from safety score';
+  }
 
+  // TRAJECTORY NOTE: Per-step SOC percentiles are not yet tracked inside run_monte_carlo.
+  // The curve shape below is estimated from the final mean_final_battery_soc and
+  // std_final_battery_soc values returned by the backend — not from step-by-step recording.
+  // The chart labels this as "estimated from MC mean & std".
   const meanSocPct = r.mean_final_battery_soc != null
     ? parseFloat((r.mean_final_battery_soc * 100).toFixed(1))
     : parseFloat((15 + successProb * 65).toFixed(1));
@@ -110,6 +126,7 @@ function mapBackendResult(r, rank, totalActions) {
     degraded:    degradedCount,
     missionLoss: missionLossCount,
     totalRuns:   n,
+    source:      distributionSource,
   };
 
 
@@ -131,8 +148,6 @@ function mapBackendResult(r, rank, totalActions) {
     distribution,
     trajectory
   };
-
-}
 
 // ─── Build winnerSummary from real backend data ───────────────────────────────
 function buildWinnerSummary(backendMsg) {

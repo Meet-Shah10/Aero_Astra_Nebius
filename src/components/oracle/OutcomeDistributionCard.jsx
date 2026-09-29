@@ -2,10 +2,11 @@ import React from "react";
 import { motion } from "motion/react";
 
 export default function OutcomeDistributionCard({ distribution, actionName }) {
-  const { nominal, degraded, missionLoss, totalRuns } = distribution;
+  const { nominal, degraded, missionLoss, totalRuns, source } = distribution;
   const nomPct  = Math.round((nominal     / totalRuns) * 100);
   const degPct  = Math.round((degraded    / totalRuns) * 100);
   const lossPct = Math.round((missionLoss / totalRuns) * 100);
+  const sourceLabel = source ?? 'est. from safety score';
 
   let insightText = "shows a high probability of full recovery with minimal mission risk in this scenario.";
   if (lossPct > 50) {
@@ -18,9 +19,8 @@ export default function OutcomeDistributionCard({ distribution, actionName }) {
 
   return (
     <div className="oracle-dist-wrap">
-      {/* Section title */}
       <div className="oracle-dist-title">
-        OUTCOME DISTRIBUTION <span className="oracle-dist-title-sub">(over {totalRuns} runs)</span>
+        OUTCOME DISTRIBUTION <span className="oracle-dist-title-sub">(over {totalRuns} runs, {sourceLabel})</span>
       </div>
 
       {/* ── Segmented bar — numbers live INSIDE each segment ── */}

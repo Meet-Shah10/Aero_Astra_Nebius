@@ -90,8 +90,8 @@ export default function SocTrajectoryChart({ trajectory, stdFinalSoc }) {
   return (
     <div className="oracle-soc-card oracle-card">
       <div className="oracle-card-title">BATTERY SOC TRAJECTORY (across runs)</div>
-      <div style={{ fontSize: 9, color: '#64748B', fontFamily: 'var(--font-mono)', marginBottom: 10, letterSpacing: '0.05em' }}>
-        Mean ± 1 Std Dev (100 runs)
+      <div style={{ fontSize: 9, color: '#64748B', fontFamily: 'var(--font-mono)', marginBottom: 6, letterSpacing: '0.05em' }}>
+        Mean ± 1 Std Dev &middot; shape estimated from MC mean &amp; std
       </div>
 
       {/* SVG chart */}

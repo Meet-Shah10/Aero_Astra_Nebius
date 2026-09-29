@@ -9,7 +9,7 @@ function LiveClock() {
   return <>{t} UTC</>;
 }
 
-export default function OracleHeader({ state, progress, backendOnline = false, onStart, onStop, onFastForward }) {
+export default function OracleHeader({ state, progress, backendOnline = false, onStart, onStop, onFastForward, actionCount = 6 }) {
   const isProcessing = state === 'PROCESSING';
   const isResult     = state === 'RESULT';
 
@@ -84,8 +84,8 @@ export default function OracleHeader({ state, progress, backendOnline = false, o
             <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
           </svg>
           <div>
-            <div style={{ fontSize: 10, fontWeight: 700 }}>Input from ATHENA</div>
-            <div style={{ fontSize: 9, opacity: 0.6 }}>6 candidate actions</div>
+            <div style={{ fontSize: 10, fontWeight: 700 }}>Evaluating Catalog Actions</div>
+            <div style={{ fontSize: 9, opacity: 0.6 }}>{actionCount} actions → ATHENA</div>
           </div>
         </div>
         {/* Backend connection indicator */}
