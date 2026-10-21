@@ -301,6 +301,8 @@ class LocalEmbedder:
 # ─────────────────────────────────────────────────────────────────────────────
 # Embedding backends — OllamaEmbedder (offline-first) / GeminiEmbedder (cloud)
 # ─────────────────────────────────────────────────────────────────────────────
+
+class OllamaEmbedder:
     """
     Embed text using the local Ollama server's embedding endpoint.
     Uses nomic-embed-text by default — a 137 M parameter model that runs

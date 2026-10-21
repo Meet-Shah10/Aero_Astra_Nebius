@@ -72,6 +72,17 @@ LOOPS = [
         "label": "EPS Cascade Power Failure",
         "subsystem": "EPS",
     },
+    {
+        "loop_id": 4,
+        "fault": "eps_stuck_sensor_flatline",
+        "severity": 1.0,
+        "label": "EPS Stuck Sensor Flatline (ADC Latch)",
+        "subsystem": "EPS",
+        # Override fault_onset to 10s inside Act 2 — the ADC latch ramp is
+        # only 5s so the flatline stabilises by t=15s, giving Engine A (which
+        # needs a 20-frame window) ~580s to accumulate and fire.
+        "_fault_onset_override": 10,
+    },
 ]
 
 
@@ -145,6 +156,10 @@ def generate(fast: bool = False) -> dict:
         print(f"\n[Loop {loop_def['loop_id']}] {loop_def['label']}")
         acts = []
 
+        # Per-loop fault onset override (e.g. fast-latching ADC faults don't
+        # need the default 120s pre-fault baseline within Act 2).
+        effective_fault_onset = loop_def.get("_fault_onset_override", fault_onset)
+
         # ── Act 1: Nominal baseline ────────────────────────────────────────────
         print(f"  Generating Act 1 (nominal, {nominal_duration}s)…")
         nom1 = simulate_scenario(
@@ -163,13 +178,13 @@ def generate(fast: bool = False) -> dict:
         print(f"    → {len(nom1.frames)} frames")
 
         # ── Act 2: Fault develops ──────────────────────────────────────────────
-        print(f"  Generating Act 2 (fault={loop_def['fault']}, {fault_duration}s, onset={fault_onset}s)…")
+        print(f"  Generating Act 2 (fault={loop_def['fault']}, {fault_duration}s, onset={effective_fault_onset}s)…")
         fault_sim = simulate_scenario(
             fault=loop_def["fault"],
             severity=loop_def["severity"],
             duration=float(fault_duration),
             dt=1.0,
-            fault_onset=float(fault_onset),
+            fault_onset=float(effective_fault_onset),
             seed=loop_def["loop_id"] * 100 + 1,
         )
         acts.append({
@@ -180,7 +195,7 @@ def generate(fast: bool = False) -> dict:
             ],
         })
         print(f"    → {len(fault_sim.frames)} frames  "
-              f"(fault active from frame {fault_onset})")
+              f"(fault active from frame {effective_fault_onset})")
 
         # ── Act 3: Recovery / cool-down ────────────────────────────────────────
         # Continue from end of fault sim so there's no state discontinuity.
@@ -212,7 +227,7 @@ def generate(fast: bool = False) -> dict:
             "severity":   loop_def["severity"],
             "label":      loop_def["label"],
             "subsystem":  loop_def["subsystem"],
-            "fault_onset_frame": nominal_duration + fault_onset,  # absolute frame idx
+            "fault_onset_frame": nominal_duration + effective_fault_onset,  # absolute frame idx
             "acts": acts,
         })
 

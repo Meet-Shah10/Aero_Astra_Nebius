@@ -184,10 +184,29 @@ def step_eps(
     capacity_factor = fault_mods.get("eps_capacity_factor", 1.0) * recovery_mods.get("eps_capacity_factor", 1.0)
     capacity_factor = _clamp(capacity_factor, 0.05, 1.0)
 
-    # Solar charging: proportional to sunlight_factor and pointing efficiency
-    solar_efficiency = fault_mods.get("eps_pointing_efficiency", 1.0) * recovery_mods.get("eps_pointing_efficiency", 1.0)
-    solar_array_current = _NOMINAL_SOLAR_CURRENT * orbit.sunlight_factor(t) * solar_factor * solar_efficiency
-    solar_array_current = max(0.0, solar_array_current)
+    # ── Stuck-sensor flatline check ───────────────────────────────────────────
+    # When eps_solar_flatline is 1.0 the solar-array-current ADC has latched.
+    # We freeze the reported value at the last reading (rounded to simulate ADC
+    # quantisation to 0.01 A resolution). The physical SOC integration below
+    # still uses the TRUE physics current so the satellite keeps charging —
+    # only the *reported* sensor channel is stuck. noise.py also suppresses
+    # Gaussian noise on solar_array_current when this fault is active so the
+    # flatline is perfect (rolling std → 0), which is what Engine A detects.
+    solar_flatline = fault_mods.get("eps_solar_flatline", 0.0)
+    if solar_flatline >= 1.0:
+        # Latch: round current reading to 0.01 A precision (ADC quantisation)
+        latch_value = round(state.eps.solar_array_current, 2)
+        solar_array_current_reported = latch_value
+        # Physical current is still computed normally for SOC integration
+        solar_efficiency = fault_mods.get("eps_pointing_efficiency", 1.0) * recovery_mods.get("eps_pointing_efficiency", 1.0)
+        solar_array_current_physical = _NOMINAL_SOLAR_CURRENT * orbit.sunlight_factor(t) * solar_factor * solar_efficiency
+        solar_array_current_physical = max(0.0, solar_array_current_physical)
+    else:
+        # Normal operation: reported == physical
+        solar_efficiency = fault_mods.get("eps_pointing_efficiency", 1.0) * recovery_mods.get("eps_pointing_efficiency", 1.0)
+        solar_array_current_reported = _NOMINAL_SOLAR_CURRENT * orbit.sunlight_factor(t) * solar_factor * solar_efficiency
+        solar_array_current_reported = max(0.0, solar_array_current_reported)
+        solar_array_current_physical = solar_array_current_reported
 
     # Load current
     load_current = _NOMINAL_LOAD_CURRENT + load_delta
@@ -199,9 +218,9 @@ def step_eps(
         excess = battery_temp - _BATTERY_TEMP_DERATE_THRESHOLD
         charge_efficiency = max(0.0, 1.0 - _BATTERY_TEMP_DERATE_COEFF * excess)
 
-    # Battery SOC integration: (charge - discharge) / effective_capacity
+    # Battery SOC integration: use the PHYSICAL current (actual charging) not the stuck reading
     effective_capacity_as = _BATTERY_CAPACITY_AH * capacity_factor * 3600.0  # Amp-seconds
-    net_current = solar_array_current * charge_efficiency - load_current
+    net_current = solar_array_current_physical * charge_efficiency - load_current
     d_soc = (net_current * dt) / effective_capacity_as
     new_soc = _clamp(state.eps.battery_soc + d_soc, 0.0, 1.0)
 
@@ -213,7 +232,7 @@ def step_eps(
 
     return EPSState(
         battery_soc=new_soc,
-        solar_array_current=solar_array_current,
+        solar_array_current=solar_array_current_reported,  # stuck/latched value for telemetry
         bus_voltage=new_voltage,
         load_current=load_current,
     )

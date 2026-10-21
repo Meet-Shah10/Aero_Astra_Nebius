@@ -151,6 +151,24 @@ FAULT_CATALOG: dict[str, FaultSpec] = {
         cascade_targets=["EPS", "TCS"],  # ADCS→* edges: wheel current draw, off-pointing
         ramp_time_s=45.0,
     ),
+    "eps_stuck_sensor_flatline": FaultSpec(
+        name="eps_stuck_sensor_flatline",
+        target_subsystem="EPS",
+        description=(
+            "Solar-array-current ADC (analogue-to-digital converter) output latches at the "
+            "last sampled value — a classic stuck-sensor / SEU bit-flip in the measurement "
+            "register. The actual array continues generating power normally, but the OBC "
+            "receives a perfectly constant reading for every subsequent telemetry frame. "
+            "SENTINEL Engine A (XGBoost flatline detector, trained on OPS-SAT data) fires "
+            "when rolling variance collapses to near-zero for ≥20 frames (~20 s). The EPS "
+            "physical state is only mildly affected because battery SOC integration still "
+            "uses the (correct) underlying physics — the danger is that ground operators "
+            "see a perfectly steady gauge and may mistake a developing array degradation "
+            "for a healthy signal."
+        ),
+        cascade_targets=[],  # Sensor read fault — no physical cascade on other subsystems
+        ramp_time_s=5.0,     # Fast onset: ADC latch is an instantaneous hardware event
+    ),
 }
 
 
@@ -309,5 +327,13 @@ def get_fault_modifiers(
         mods["ttc"]["ttc_signal_delta"] = -20.0 * eff
         # EPS→Propulsion: valve actuators offline (no active burn possible)
         mods["prop"]["prop_burn_rate"] = 0.0
+
+    # ── EPS stuck-sensor flatline (ADC latch) ─────────────────────────────────
+    elif fault_name == "eps_stuck_sensor_flatline":
+        # The ADC register latches immediately once eff reaches ~1.0 (ramp_time_s=5s).
+        # We signal the transition function to freeze solar_array_current at its
+        # current value by setting eps_solar_flatline to the ramp fraction.
+        # The transition function reads this and returns a constant clamped value.
+        mods["eps"]["eps_solar_flatline"] = eff  # 0→1 over 5s, then stays at 1.0
 
     return mods

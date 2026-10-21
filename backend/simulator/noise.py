@@ -83,9 +83,19 @@ def apply_noise(state: SatelliteState, rng: np.random.Generator) -> SatelliteSta
     """
     n = rng.standard_normal
 
+    # ── Flatline fault: suppress solar_array_current noise ───────────────────
+    # When the stuck-sensor fault is active the ADC is latched — adding
+    # Gaussian noise would mask the zero-variance signature that Engine A
+    # needs to detect. All other channels remain noisy as normal.
+    suppress_solar_noise = (state.active_fault == "eps_stuck_sensor_flatline")
+
     eps = EPSState(
         battery_soc=_clamp(state.eps.battery_soc + n() * _EPS_NOISE["battery_soc"], 0.0, 1.0),
-        solar_array_current=max(0.0, state.eps.solar_array_current + n() * _EPS_NOISE["solar_array_current"]),
+        solar_array_current=(
+            state.eps.solar_array_current  # frozen — no noise when sensor is stuck
+            if suppress_solar_noise
+            else max(0.0, state.eps.solar_array_current + n() * _EPS_NOISE["solar_array_current"])
+        ),
         bus_voltage=_clamp(state.eps.bus_voltage + n() * _EPS_NOISE["bus_voltage"], 0.0, 36.0),
         load_current=max(0.0, state.eps.load_current + n() * _EPS_NOISE["load_current"]),
     )

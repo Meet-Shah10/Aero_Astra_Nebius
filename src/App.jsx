@@ -27,8 +27,8 @@ const AGENT_ROSTER = [
   { code: 'CHRONICLE', role: 'The Live Log', desc: 'A running event log of everything happening, in real time, as it happens.', status: 'wired' },
   { code: 'SENTINEL', role: 'The Early Warning System', desc: 'Watches all telemetry 24/7 and knows when something starts to look wrong — before a human would notice.', status: 'wired' },
   { code: 'SHERLOCK', role: 'The Detective', desc: "When SENTINEL raises an alarm, SHERLOCK figures out why — tracing the problem back to its root cause through a physics-constrained causal graph.", status: 'wired' },
-  { code: 'ORACLE', role: 'The Simulator', desc: 'Runs 100 independent Monte Carlo simulations of each candidate fix before anything executes — odds, not guesses.', status: 'wired' },
   { code: 'ATHENA', role: 'The Strategist', desc: "Using ORACLE's simulations, picks the best recovery plan and writes out every step, in order, with its reasoning.", status: 'wired' },
+  { code: 'ORACLE', role: 'The Simulator', desc: 'Runs 100 independent Monte Carlo simulations of each candidate fix before anything executes — odds, not guesses.', status: 'wired' },
   { code: 'GUARDIAN', role: 'The Safety Gate', desc: 'Low-risk fixes auto-execute and log themselves. High-risk fixes wait for a human to press approve — nothing executes without it.', status: 'wired' },
   { code: 'SCRIBE', role: 'The Accountant', desc: "Every decision, every step, every agent's reasoning gets written into an audit trail automatically.", status: 'planned' },
   { code: 'VITALS', role: 'The Proactive Monitor', desc: 'Tracks subsystem health scores and remaining-useful-life estimates so degradation is visible before it becomes an anomaly.', status: 'wired' },
@@ -571,8 +571,27 @@ function App() {
               }
               break;
             case 'awaiting_activation':
-              // Sent by backend when anomaly is stored and waiting for manual SHERLOCK trigger
+              // Sent by backend when anomaly is stored and waiting for manual SHERLOCK trigger.
+              // MUST set scenarioPhase so hasIncidentData becomes true and SherlockPage
+              // renders the "Activate SHERLOCK" button instead of the empty state.
               setAwaitingActivation(true);
+              setSherlockDone(false);
+              setScenarioPhase('detected');
+              setReplayAct('fault_developing');
+              // Seed activeScenario so SherlockPage has a subsystem to work with
+              if (msg.flagged_subsystem) {
+                const loopScenario = {
+                  key: msg.anomaly_id,
+                  faultId: msg.anomaly_id,
+                  label: msg.fault_label ?? msg.flagged_subsystem,
+                  subsystem: msg.flagged_subsystem,
+                  rootCause: msg.fault_label ?? msg.flagged_subsystem,
+                  causalChain: [msg.flagged_subsystem],
+                  isCaseStudy: false,
+                };
+                setActiveScenario(prev => prev ?? loopScenario);
+                activeScenarioRef.current = activeScenarioRef.current ?? loopScenario;
+              }
               break;
             case 'sherlock_done':
               // SHERLOCK completed — enable the ATHENA button

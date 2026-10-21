@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { gsap } from 'gsap';
 import BorderGlow from './BorderGlow';
 import OracleView from './oracle/OracleView.jsx';
 import ResidualChart from './ResidualChart';
@@ -217,48 +216,25 @@ function SherlockPage({ activeScenario, isAnomaly, hasIncidentData, liveTelemetr
   const [replayKey, setReplayKey] = useState(0);
   const nodeRefs = useRef([]);
   const edgeRefs = useRef([]);
-  const tlRef = useRef(null);
 
   // chain[0] is always the true root — rendered at top.
   // chain[last] is the most downstream visible symptom — at the bottom.
   const chain = activeScenario ? (activeScenario.causalChain ?? []) : [];
   const n = chain.length;
 
-  // Entrance animation. useEffect (not useLayoutEffect) so it runs AFTER
-  // the browser has painted and SVG node refs are guaranteed populated.
-  // Nodes default to opacity:1 via their natural CSS state, so the graph
-  // is ALWAYS visible even if GSAP is skipped or the animation fails.
+  // Animate node selection bottom-up using a simple counter — no GSAP opacity
+  // manipulation so React never fights GSAP over the `style` prop.
   useEffect(() => {
     if (awaitingActivation || n === 0) return;
-
-    // Confirm every ref is populated before touching GSAP
-    const nodes = nodeRefs.current.slice(0, n).filter(Boolean);
-    const edges = edgeRefs.current.slice(0, n - 1).filter(Boolean);
-    if (nodes.length !== n) return; // refs not ready — skip gracefully
-
+    // Walk selection from last node up to root, highlighting each in turn
     setSelected(n - 1);
-    if (tlRef.current) tlRef.current.kill();
-
-    // Slide-in from slight offset — nodes are opaque by default so if
-    // animation is skipped they’re still fully visible.
-    gsap.set(nodes, { opacity: 0, y: 10, transformOrigin: '50% 50%' });
-    gsap.set(edges, { opacity: 0 });
-
-    const tl = gsap.timeline();
-    tlRef.current = tl;
-
-    // Reveal bottom-up: symptom first, root cause last
-    for (let i = n - 1; i >= 0; i--) {
-      tl.to(nodes[i], { opacity: 1, y: 0, duration: 0.28, ease: 'power2.out' });
-      if (i > 0) {
-        tl.to(edges[i - 1], { opacity: 1, duration: 0.22, ease: 'power2.inOut' }, '-=0.05');
-      }
-      tl.call(() => setSelected(i));
-    }
-    tl.to(nodes[0], { duration: 0.1 });
-    tl.call(() => setSelected(0));
-
-    return () => { if (tlRef.current) tlRef.current.kill(); };
+    let i = n - 1;
+    const interval = setInterval(() => {
+      i--;
+      if (i < 0) { clearInterval(interval); setSelected(0); return; }
+      setSelected(i);
+    }, 320);
+    return () => clearInterval(interval);
   }, [activeScenario, awaitingActivation, n, replayKey]);
 
   // ── Manual activation gate ────────────────────────────────────────────────
@@ -359,7 +335,7 @@ function SherlockPage({ activeScenario, isAnomaly, hasIncidentData, liveTelemetr
                   key={s}
                   ref={el => { nodeRefs.current[i] = el; }}
                   onClick={() => setSelected(i)}
-                  style={{ cursor: 'pointer' }}
+                  style={{ cursor: 'pointer', opacity: 1 }}
                 >
                   <circle
                     cx={xCenter} cy={yFor(i)} r={NODE_R}

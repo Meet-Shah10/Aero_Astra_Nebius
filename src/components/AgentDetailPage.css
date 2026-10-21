@@ -180,6 +180,12 @@
   border-radius: 8px;
   padding: 10px;
   background: rgba(255, 255, 255, 0.015);
+  animation: causal-fadein 0.4s ease both;
+}
+
+@keyframes causal-fadein {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 .causal-detail {

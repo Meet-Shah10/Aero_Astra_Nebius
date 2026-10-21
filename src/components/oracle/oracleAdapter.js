@@ -148,6 +148,7 @@ function mapBackendResult(r, rank, totalActions) {
     distribution,
     trajectory
   };
+}
 
 // ─── Build winnerSummary from real backend data ───────────────────────────────
 function buildWinnerSummary(backendMsg) {
