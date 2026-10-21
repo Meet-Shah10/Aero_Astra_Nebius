@@ -45,11 +45,42 @@ const DEPENDENCY_POSITIONS = Object.fromEntries(
   })
 );
 
+const DEPENDENCY_NODE_LABELS = {
+  TCS: 'TCS',
+  EPS: 'EPS',
+  OBC: 'OBC',
+  ADCS: 'ADCS',
+  'TT&C': 'TT&C',
+  Propulsion: 'PROP',
+};
+
+function normalizeSubsystem(value) {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toUpperCase();
+  if (DEPENDENCY_SUBSYSTEMS.includes(value)) return value;
+  if (normalized.includes('TT&C') || normalized.includes('TT AND C') || normalized.includes('TELEMETRY')) return 'TT&C';
+  if (normalized.includes('PROPULSION') || normalized.includes('THRUSTER')) return 'Propulsion';
+  if (normalized.includes('ADCS') || normalized.includes('ATTITUDE')) return 'ADCS';
+  if (normalized.includes('OBC') || normalized.includes('ONBOARD COMPUTER')) return 'OBC';
+  if (normalized.includes('TCS') || normalized.includes('THERMAL')) return 'TCS';
+  if (normalized.includes('EPS') || normalized.includes('POWER')) return 'EPS';
+  return null;
+}
+
+function normalizeCausalChain(chain, fallbackSubsystem) {
+  const normalized = (Array.isArray(chain) ? chain : [])
+    .map(normalizeSubsystem)
+    .filter(Boolean);
+  return normalized.length ? [...new Set(normalized)] : [normalizeSubsystem(fallbackSubsystem)].filter(Boolean);
+}
+
 // Full 6-node/18-edge dependency graph, with the flagged subsystem's
 // candidate set (graph-computed predecessors) and the confirmed causal
 // chain highlighted on top of it — this is what actually constrains
 // SHERLOCK's LLM call on the backend, not just the one chain that fired.
 function DependencyGraph({ flaggedSubsystem, causalChain }) {
+  const [selectedNode, setSelectedNode] = useState(flaggedSubsystem);
+  useEffect(() => setSelectedNode(flaggedSubsystem), [flaggedSubsystem]);
   const candidateSet = new Set([
     flaggedSubsystem,
     ...DEPENDENCY_EDGES.filter(([, to]) => to === flaggedSubsystem).map(([from]) => from),
@@ -58,10 +89,15 @@ function DependencyGraph({ flaggedSubsystem, causalChain }) {
   const chainEdgeSet = new Set(
     causalChain.slice(0, -1).map((s, i) => `${s}->${causalChain[i + 1]}`)
   );
+  const selectedIncoming = DEPENDENCY_EDGES.filter(([, to]) => to === selectedNode).map(([from]) => from);
+  const selectedOutgoing = DEPENDENCY_EDGES.filter(([from]) => from === selectedNode).map(([, to]) => to);
+  const selectedIsChain = chainSet.has(selectedNode);
+  const selectedIsCandidate = candidateSet.has(selectedNode);
 
   return (
     <div className="dep-graph-wrap">
-      <svg width={280} height={280} viewBox="0 0 280 280">
+      <div className="dep-graph-canvas">
+        <svg width={280} height={280} viewBox="0 0 280 280" role="img" aria-label="Sherlock subsystem dependency graph">
         <defs>
           <marker id="dep-arrow-dim" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
             <path d="M0,0 L6,3 L0,6 Z" fill="rgba(255,255,255,0.15)" />
@@ -101,19 +137,48 @@ function DependencyGraph({ flaggedSubsystem, causalChain }) {
           const isFlagged = s === flaggedSubsystem;
           const isChain = chainSet.has(s);
           const isCandidate = candidateSet.has(s) && !isChain;
+          const isSelected = s === selectedNode;
           const fill = isChain ? 'rgba(82,255,82,0.14)' : isFlagged ? 'rgba(255,90,90,0.14)' : isCandidate ? 'rgba(255,190,90,0.1)' : 'rgba(255,255,255,0.03)';
           const stroke = isChain ? '#52ff52' : isFlagged ? '#ff5a5a' : isCandidate ? 'rgba(255,190,90,0.8)' : 'rgba(255,255,255,0.25)';
           return (
-            <g key={s}>
-              <circle cx={p.x} cy={p.y} r={22} fill={fill} stroke={stroke} strokeWidth={isChain || isFlagged ? 2 : 1.2} />
+            <g
+              key={s}
+              className={`dep-graph-node${isSelected ? ' dep-graph-node--selected' : ''}`}
+              role="button"
+              tabIndex={0}
+              aria-label={`Select ${s} subsystem`}
+              onClick={() => setSelectedNode(s)}
+              onKeyDown={event => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  setSelectedNode(s);
+                }
+              }}
+            >
+              <title>{s} subsystem — click to inspect dependencies</title>
+              {isSelected && <circle className="dep-graph-node-ring" cx={p.x} cy={p.y} r={27} fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="1" strokeDasharray="2 3" />}
+              <circle className="dep-graph-node-circle" cx={p.x} cy={p.y} r={22} fill={fill} stroke={stroke} strokeWidth={isSelected || isChain || isFlagged ? 2 : 1.2} />
               <text x={p.x} y={p.y + 4} textAnchor="middle" fontSize="9.5" fontWeight="700"
                 fontFamily="var(--font-mono)" fill={isChain ? '#52ff52' : isFlagged ? '#ff5a5a' : '#EDEEF2'}>
-                {s}
+                {DEPENDENCY_NODE_LABELS[s]}
               </text>
             </g>
           );
         })}
-      </svg>
+        </svg>
+      </div>
+      <div className="dep-graph-detail" aria-live="polite">
+        <div className="dep-graph-detail-kicker">SELECTED SUBSYSTEM</div>
+        <div className="dep-graph-detail-title">{selectedNode}</div>
+        <div className="dep-graph-detail-status">
+          {selectedNode === flaggedSubsystem ? 'SENTINEL flagged this subsystem' : selectedIsChain ? 'Part of the confirmed causal chain' : selectedIsCandidate ? 'Graph-valid candidate' : 'Connected dependency'}
+        </div>
+        <div className="dep-graph-detail-links">
+          <div><span>INBOUND</span>{selectedIncoming.length ? selectedIncoming.join(' · ') : 'None'}</div>
+          <div><span>OUTBOUND</span>{selectedOutgoing.length ? selectedOutgoing.join(' · ') : 'None'}</div>
+        </div>
+        <div className="dep-graph-detail-hint">Click any node to inspect its dependencies.</div>
+      </div>
       <div className="dep-graph-legend">
         <div><i className="dep-legend-swatch" style={{ background: 'rgba(255,90,90,0.8)' }} /> Flagged subsystem (SENTINEL)</div>
         <div><i className="dep-legend-swatch" style={{ background: 'rgba(255,190,90,0.8)' }} /> Graph-valid candidates (physically possible)</div>
@@ -211,7 +276,7 @@ const NODE_GAP = 128;
 const NODE_R = 34;
 const GRAPH_W = 340;
 
-function SherlockPage({ activeScenario, isAnomaly, hasIncidentData, liveTelemetry, awaitingActivation, onActivateSherlock, sherlockLoading }) {
+function SherlockPage({ activeScenario, isAnomaly, hasIncidentData, liveTelemetry, backendData, awaitingActivation, onActivateSherlock, sherlockLoading }) {
   const [selected, setSelected] = useState(0);
   const [replayKey, setReplayKey] = useState(0);
   const nodeRefs = useRef([]);
@@ -219,7 +284,9 @@ function SherlockPage({ activeScenario, isAnomaly, hasIncidentData, liveTelemetr
 
   // chain[0] is always the true root — rendered at top.
   // chain[last] is the most downstream visible symptom — at the bottom.
-  const chain = activeScenario ? (activeScenario.causalChain ?? []) : [];
+  const chain = activeScenario
+    ? normalizeCausalChain(activeScenario.causalChain, activeScenario.subsystem)
+    : [];
   const n = chain.length;
 
   // Animate node selection bottom-up using a simple counter — no GSAP opacity
@@ -290,6 +357,8 @@ function SherlockPage({ activeScenario, isAnomaly, hasIncidentData, liveTelemetr
   const selectedKey = SUBSYSTEM_TELEMETRY_KEY[selectedSubsystem];
   const selectedReading = selectedKey ? liveTelemetry[selectedKey] : 'Elevated deviation detected';
   const isRootSelected = selected === 0;
+  const sherlockDiagnosis = backendData?.sherlock;
+  const diagnosisText = sherlockDiagnosis?.reasoning || sherlockDiagnosis?.primary_root_cause || activeScenario.rootCause;
 
   return (
     <>
@@ -304,7 +373,7 @@ function SherlockPage({ activeScenario, isAnomaly, hasIncidentData, liveTelemetr
           only physically valid root causes are itself plus every subsystem with an edge pointing into it — the LLM's
           diagnosis is constrained to this set before it ever runs, so it cannot claim a root cause the graph rules out.
         </p>
-        <DependencyGraph flaggedSubsystem={activeScenario.subsystem} causalChain={chain} />
+        <DependencyGraph flaggedSubsystem={normalizeSubsystem(activeScenario.subsystem) ?? activeScenario.subsystem} causalChain={chain} />
       </div>
 
       <div className="sherlock-layout">
@@ -343,9 +412,10 @@ function SherlockPage({ activeScenario, isAnomaly, hasIncidentData, liveTelemetr
                     stroke={isRoot ? '#52ff52' : isSel ? '#EDEEF2' : 'rgba(255,255,255,0.25)'}
                     strokeWidth={isSel ? 2 : 1.2}
                   />
+                  <title>{s} subsystem — click to inspect root-cause details</title>
                   <text x={xCenter} y={yFor(i) + 4} textAnchor="middle" fontSize="11" fontWeight="700"
                     fontFamily="var(--font-mono)" fill={isRoot ? '#52ff52' : '#EDEEF2'}>
-                    {s}
+                    {DEPENDENCY_NODE_LABELS[s] ?? s}
                   </text>
                   {isRoot && (
                     <text x={xCenter} y={yFor(i) - NODE_R - 10} textAnchor="middle" fontSize="9"
@@ -367,6 +437,8 @@ function SherlockPage({ activeScenario, isAnomaly, hasIncidentData, liveTelemetr
               <div className="causal-box-subsystem">{selectedSubsystem}</div>
               <div className="causal-box-reading">{selectedReading}</div>
               {isRootSelected && <div className="causal-box-verdict">{activeScenario.rootCause}</div>}
+              <div className="causal-box-diagnosis-label">SHERLOCK DIAGNOSIS</div>
+              <div className="causal-box-diagnosis">{diagnosisText}</div>
             </div>
           </BorderGlow>
           <button className="causal-nav-btn" style={{ marginTop: 14 }} onClick={() => setReplayKey(k => k + 1)}>

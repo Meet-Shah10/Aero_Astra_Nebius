@@ -151,6 +151,69 @@
   gap: 24px;
   flex-wrap: wrap;
 }
+.dep-graph-canvas {
+  flex: 0 0 280px;
+  display: grid;
+  place-items: center;
+}
+.dep-graph-node {
+  outline: none;
+  cursor: pointer;
+}
+.dep-graph-node:focus-visible .dep-graph-node-circle,
+.dep-graph-node:hover .dep-graph-node-circle {
+  filter: brightness(1.35);
+}
+.dep-graph-detail {
+  width: 220px;
+  min-height: 136px;
+  padding: 14px;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  background: linear-gradient(145deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02));
+  box-shadow: 0 10px 30px rgba(0,0,0,0.16);
+}
+.dep-graph-detail-kicker,
+.dep-graph-detail-links span {
+  color: rgba(255,190,90,0.75);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+}
+.dep-graph-detail-title {
+  margin-top: 5px;
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 700;
+}
+.dep-graph-detail-status {
+  margin-top: 5px;
+  color: rgba(255,255,255,0.62);
+  font-size: 10px;
+  line-height: 1.45;
+}
+.dep-graph-detail-links {
+  display: grid;
+  gap: 5px;
+  margin-top: 12px;
+  color: rgba(255,255,255,0.8);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1.35;
+}
+.dep-graph-detail-links span {
+  display: inline-block;
+  width: 52px;
+  margin-right: 4px;
+}
+.dep-graph-detail-hint {
+  margin-top: 12px;
+  color: rgba(255,255,255,0.35);
+  font-size: 9px;
+  line-height: 1.4;
+}
 .dep-graph-legend {
   display: flex;
   flex-direction: column;
@@ -165,6 +228,18 @@
   height: 9px;
   border-radius: 2px;
   flex-shrink: 0;
+}
+
+@media (max-width: 760px) {
+  .dep-graph-wrap {
+    justify-content: center;
+  }
+  .dep-graph-detail {
+    width: min(280px, 100%);
+  }
+  .dep-graph-legend {
+    width: 100%;
+  }
 }
 
 /* Causal graph (SHERLOCK) */
@@ -244,6 +319,26 @@
   color: rgba(255, 255, 255, 0.6);
   border-top: 1px dashed rgba(255, 255, 255, 0.15);
   padding-top: 10px;
+}
+
+.causal-box-diagnosis-label {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(82, 255, 82, 0.8);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.causal-box-diagnosis {
+  margin-top: 6px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 11px;
+  line-height: 1.55;
+  text-align: left;
+  overflow-wrap: anywhere;
 }
 
 .causal-trail {
